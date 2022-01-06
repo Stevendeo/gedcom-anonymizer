@@ -28,7 +28,6 @@
  (depends
    (ocaml (>= 4.07.0))
    (ez_file ( >= 0.2 ))
-   (ez_cmdliner (and (>= 0.4.2) (< 1.0.0)))
    (base-unix ( >= base ))
    ppx_inline_test
    ppx_expect
