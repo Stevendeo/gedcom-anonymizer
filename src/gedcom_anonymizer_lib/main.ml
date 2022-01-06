@@ -72,6 +72,12 @@ let names =
      "Noëlle"; "Odile"; "Patricia"; "Quitterie"; "Rosine"; "Sidonie";
      "Thérèse"; "Ursule"; "Vanessa"; "Wilfried"; "Xavière"; "Yvonne"; "Zoé" |]
 
+let names_with_counter =
+  Array.map
+    (fun n -> n, ref 0)
+    names
+
+
 let loremize size =
   if size >= lorem_size
   then lorem
@@ -86,20 +92,27 @@ let random_age i = string_of_int (Random.int ( 2 * int_of_string i))
 
 let random_num rang = string_of_int (Random.int rang)
 
-let random_name () = names.(Random.int 52)
+(* Selects a random new name; if the name in argument
+   already has been translated, selects the translation. *)
+let random_name () =
+  let n, c = names_with_counter.(Random.int 52) in
+  let trad_name = n ^ "." ^ string_of_int !c in
+  c := !c + 1;
+  trad_name
 
 let update_line ((lvl, xref, tag, _) : Gedcom.gedcom_line) content : Gedcom.gedcom_line =
-  if content = "" then  
+  if content = "" then
     (lvl, xref, tag, None)
   else
     (lvl, xref, tag, Some content)
 
-let anon_line (line : Gedcom.gedcom_line) =
-  let v = Gedcom.value line in
+(* Takes a line and its associated value, returns
+   the line with an updated value. *)
+let _anon_line (line : Gedcom.gedcom_line) (v : string) =
   let new_val =
     if v = "" then ""
     else if String.get v 0 = '@' then v
-    else 
+    else
       match Gedcom.tag line with
       | "AGE" -> random_age v
       | "DATE" -> Date.(to_string @@ get_random_date ())
@@ -110,8 +123,7 @@ let anon_line (line : Gedcom.gedcom_line) =
       | "FORM" -> "txt"
 
       | "AUTH" | "GIVN" | "NAME" | "NICK"
-      | "SURN" ->
-          random_name ()
+      | "SURN" -> random_name ()
 
       | "COPR" -> "Private"
       | "CORP" -> random_name () ^ " Corp."
@@ -185,6 +197,15 @@ let anon_line (line : Gedcom.gedcom_line) =
       | t -> failwith ("Unknown tag " ^ t)
   in update_line line new_val
 
+let anon_line l =
+  let h = Hashtbl.create 101 in
+  let v = Gedcom.value l in
+  match Hashtbl.find_opt h v with
+  | None ->
+      let res = _anon_line l v in
+      Hashtbl.add h v res;
+      res
+  | Some res -> res
 
 
 let anon_file input output =
@@ -195,4 +216,3 @@ let anon_file input output =
   List.iter
     (fun l -> Gedcom_print.pp_gedcom_line fmt (anon_line l))
     lines
-  
