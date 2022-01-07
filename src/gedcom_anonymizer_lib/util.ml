@@ -10,8 +10,5 @@
 (*                                                                        *)
 (**************************************************************************)
 
-let map_tr f l =
-  let rec loop acc = function
-    | [] -> List.rev acc
-    | hd :: tl -> loop (f hd :: acc) tl in
-  loop [] l
+let is_int str =
+  try ignore (int_of_string str); true with _ -> false

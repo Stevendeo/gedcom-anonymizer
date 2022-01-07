@@ -72,12 +72,11 @@ let names =
      "Noëlle"; "Odile"; "Patricia"; "Quitterie"; "Rosine"; "Sidonie";
      "Thérèse"; "Ursule"; "Vanessa"; "Wilfried"; "Xavière"; "Yvonne"; "Zoé" |]
 
-let names_with_counter =
-  Array.map
-    (fun n -> n, ref 0)
-    names
+let string_table = Hashtbl.create 101
+let name_table = Hashtbl.create 101
+let lastname_table = Hashtbl.create 101
 
-
+(* Selects a random substring of the lorem string of size size *)
 let loremize size =
   if size >= lorem_size
   then lorem
@@ -85,20 +84,84 @@ let loremize size =
     let offset = Random.int (lorem_size - size) in
     String.sub lorem offset size
 
+(* Given a string of size 'r', returns a random
+   substring of lorem of size 'r' *)
 let loremize_str str =
   loremize (String.length str)
+
+(* Names with the format fname/lname return fname, lname, None
+   Names with the format fname/lname/id return fname, lname, Some id
+ *)
+let get_name_from_reference str =
+  match String.split_on_char '/' str with
+  | [fname; lname] -> fname, lname, None
+  | [fname; lname; id] -> fname, lname, Some id
+  | _ -> assert false
+
+(* Loremizes a wiki text (keeping compatibility with references)
+let randomize_wiki_text str =
+  (* Splitting the text enclosed by "[[" and "]]" ; expects to be well
+     parenthesized. If str starts with "[[", we add "" at the beginning
+     of the list *)
+  let strs =
+    let regexp = Str.regexp "\\[\\[\\|\\]\\]" in
+    let substrings = Str.split regexp str in
+    if
+      String.length str <= 1
+      || String.get str 0 <> '['
+      || String.get str 1 <> '['
+    then substrings
+    else "" :: substrings
+  in
+  let anon_strs =
+    List.mapi
+      (fun i str ->
+         if i land 1 = 0
+         then (* text *) loremize_str str
+         else (* reference *)
+
+           match String.split_on_char '/' str with
+           | fname :: lname :: id
+      )
+      strs*)
 
 let random_age i = string_of_int (Random.int ( 2 * int_of_string i))
 
 let random_num rang = string_of_int (Random.int rang)
 
-(* Selects a random new name; if the name in argument
-   already has been translated, selects the translation. *)
-let random_name () =
-  let n, c = names_with_counter.(Random.int 52) in
-  let trad_name = n ^ "." ^ string_of_int !c in
-  c := !c + 1;
-  trad_name
+let pure_random_name () =
+  let fn = names.(Random.int 52) in
+  let ln = names.(Random.int 52) in
+  Format.sprintf "%s /%s/" fn ln
+
+let add_new_name table key =
+  let name = names.(Random.int 52) in
+  Hashtbl.add table key name;
+  name
+
+let random_name_from_name fname lname =
+  let new_fname =
+    match Hashtbl.find_opt name_table fname with
+    | Some name -> name
+    | None -> add_new_name name_table fname
+  in
+  let new_lname =
+    match Hashtbl.find_opt lastname_table lname with
+    | Some name -> name
+    | None -> add_new_name lastname_table lname in
+  Format.sprintf "%s /%s/" new_fname new_lname
+
+(* If the name has the format FNAME FNAME2 ... /LNAME/, transforms it into
+   the same name format. Otherwise, returns a random FNAME LNAME. *)
+let random_name old_name =
+  match List.rev (String.split_on_char ' ' old_name) with
+  | lname :: fname when Str.string_match (Str.regexp "/.*/") lname 0 -> begin
+      (* Name format: FNAME FNAME2 ... /LNAME/ *)
+      match String.split_on_char '/' lname with
+      | [""; real_lname; ""] -> random_name_from_name (String.concat " " (List.rev fname)) real_lname
+      | _ -> assert false
+    end
+  | _ -> pure_random_name ()
 
 let update_line ((lvl, xref, tag, _) : Gedcom.gedcom_line) content : Gedcom.gedcom_line =
   if content = "" then
@@ -123,15 +186,15 @@ let _anon_line (line : Gedcom.gedcom_line) (v : string) =
       | "FORM" -> "txt"
 
       | "AUTH" | "GIVN" | "NAME" | "NICK"
-      | "SURN" -> random_name ()
+      | "SURN" -> random_name v
 
       | "COPR" -> "Private"
-      | "CORP" -> random_name () ^ " Corp."
+      | "CORP" -> pure_random_name () ^ " Corp."
       | "CITY" | "CTRY" | "NATI" | "STAE"
-      | "PLAC" -> random_name () ^ " Land"
+      | "PLAC" -> pure_random_name () ^ " Land"
       | "EDUC" -> random_num 10 ^ " years"
       | "IDNO" -> random_num 10000
-      | "LANG" -> random_name () ^ " Landish"
+      | "LANG" -> pure_random_name () ^ "landish"
 
       | "LATI" ->
           let num = random_num 89 ^ "." ^ random_num 999 in
@@ -147,7 +210,7 @@ let _anon_line (line : Gedcom.gedcom_line) (v : string) =
       | "RIN" -> random_num 42
       | "NPFX" -> "PhD"
       | "NFSX" -> "Jr."
-      | "OCCU" -> random_name () ^ "'s assistant"
+      | "OCCU" -> pure_random_name () ^ "'s assistant"
       | "PEDI" -> "pedigree"
       | "PHON" -> "+1-111-111-1142"
       | "POST" -> random_num 1000
@@ -193,17 +256,22 @@ let _anon_line (line : Gedcom.gedcom_line) (v : string) =
       (*  Not a valid 5.5.1 field, but found in some gedcom file*)
 
       | "FACT" | "FAX" | "FONE" | "QUAY"
-      | "ROMN" | "WILL" as t -> failwith ("Unhandled " ^ t)
-      | t -> failwith ("Unknown tag " ^ t)
+      | "ROMN" | "WILL" as t ->
+          Format.eprintf "Unhandled tag %s@." t;
+          loremize_str v
+
+      | t ->
+          Format.eprintf "Unknown tag %s" t;
+          loremize_str v
+
   in update_line line new_val
 
 let anon_line l =
-  let h = Hashtbl.create 101 in
   let v = Gedcom.value l in
-  match Hashtbl.find_opt h v with
+  match Hashtbl.find_opt string_table v with
   | None ->
       let res = _anon_line l v in
-      Hashtbl.add h v res;
+      Hashtbl.add string_table v res;
       res
   | Some res -> res
 
